@@ -1,0 +1,98 @@
+Analysis is started by running the run_parser.sh script with three arguments:
+1) Start time (flag -b)
+2) End time (flag -e)
+3) Interval Time (flag -s)
+
+The Interval Time is only important for the linegraphs. 
+
+The run_parser.sh calls parse_script.sh on each category of data. 
+So the following analysis is done for each cateogry in V4  vs. V6, Ping vs. SOA, and Anchors vs. all VPs. 
+For each actegory, parse_script.sh takes the following arguments:
+1) Start Time
+2) End Time 
+3) JSON file with measurement ids for the category
+4) Interval Time
+5) soa vs. ping
+6) Flag ("t" or "f") for whether or not to generate graphs [may be broken, so just keep as "f" for now, or remove]
+
+Ten run_parser.sh does most of the work. I will describe what run_parser.sh does, calls, and stores (and where). 
+
+STEP 1: Download data:
+* run_parser.sh downloads data in 4 hour chunks. 
+* As such, it first finds the largest 4 hour chunk start time smalller than START time and the smallest 4 hour chunk end time larger than END time. 
+* Then it downloads all 4 our chunks and stores them in /nfs/lander/traces/external/ripe_atlas/. 
+* The file itself can be found from there with the address given by {datetime date}/{Start time in datetime}.{duration}.{measurement id}.{data type}.json
+
+STEP 2: Make appropriate directories if they do not yet exist
+
+STEP 3: Save relevant data filenames into txt files, one for each root. 
+
+STEP 4: FOR EACH ROOT, Parse Data into Percentage Dictionary, Sequential Dictionary, and Duration Dictionary (through parse_data.py)
+* Input is the text file which all of the relevant data tile names, the root server, START time and END time. 
+* Outputs are the following
+  1) Perecentage DF: DF with 3 columns, Root, Probe Id, Percetange of failure
+  2) Sequential DF: DF with 3 columns, Root, Probe Id, list of 1s and 0s (each 1 signifies success, each 0 signifies failure)
+  3) Longest Duration DF: DF with 3 colummns, Root, Probe Id, and longest duration of consecutive failures. 
+* Outputs can be found as follows:
+  1) "/nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_DATA/{START TIME}.${DURATION}/${MEASUREMENT TYPE}/${root name}.${measurement id}.${STAR TIME}.${DURATION}.${INTERVAL}.${DATA TYPE}.percent.csv"
+  2) "/nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_DATA/{START TIME}.${DURATION}/${MEASUREMENT TYPE}/${root name}.${measurement id}.${STAR TIME}.${DURATION}.${INTERVAL}.${DATA TYPE}.length.csv"
+  3) "/nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_DATA/{START TIME}.${DURATION}/${MEASUREMENT TYPE}/${root name}.${measurement id}.${STAR TIME}.${DURATION}.${INTERVAL}.${DATA TYPE}.sequence.csv"
+
+STEP 5: FOR EACH ROOT, categorize probes according to their performance (current analysis is based solely on percent) (throughout categorize_probes.py)
+*Input is the percent dictionary (and in the future, the sequence dictionary to apply CUSUM)
+*Outputs are the following
+  1) Categorized DF: DF with 3 columns, Probe Id, Categorization (ALways Loss [AL], Never Loss [NL], etc.), percentage failure
+  2) Dict to be ignored for now
+  3) Dictionary with key: root, val: dictionary
+     dictionary (which is value) has keys with the following information: list of probes which are bad for the root, tototal number of probes, total number of bad probes 
+*Outputs can be found asfollows:
+  1)"/nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${START TIME}.${DURATION}/${DIR_NAME}/${root}.${measurement id}.${START TIME}.${DURATION}.${BIN}.${DATA TYPE}.classifications_percentages.csv"
+  2)"/nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${START TIME}.${DURATION}/${DIR_NAME}/${STARTTIME}.${DURATION}.${BIN}.${DATA TYPE}.root_data.json"
+  3)"/nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${START TIME}.${DURATION}/${DIR_NAME}/${STARTTIME}.${DURATION}.${BIN}.${DATA TYPE}.bad_probe_by_root.json"
+
+STEP 6: Aggergate the categorizations and extract summaries and statistics (through aggregate_classification.py)
+*Input: the files with *.classifications_percentages created in STEP 5. 
+*Ouptuts are following:
+ 1)DF with rows probe id, columns root name servers, one column called Tags. Each cell is the classification of the VP for the corresponding root, and the tag is the overall classification
+ 2)Dictionary with keys "Island," (list of island probes) "Peninsula" (list of peninsulas probes), "Peninsula Failure" (list of where each peninsula fails saved as string), "Weak Island" (list of weak islands) "Weak Peninsula" (list of weak peninsulas)
+ 3) Same as (1) except with no tag column and the percentage faiures in the cells
+ 4) Dictionary with key "Islands" and value list of islands
+ 5) Dictionary with keys "Peninsulas" (list of peninsulas) and "Peninsula Failure List" (list ofwhere each peninsula fails saved as string)
+ 6) Dictionary with keys "Total Probes", "Total Islands", "Total Peninsulas", "Total Weak Ilsands", "Total Weak Peninsulas" (value is a list with the COUNT for each)
+ 7) Dictionary with keys roots and values the number of VPs which fail at that root.
+
+*Outputs can be found as follows:
+ 1) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/aggregate_classifications.csv
+ 2) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/classifications.csv
+ 3) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/percentages.csv
+ 4) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/island.json
+ 5) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/peninsula.json
+ 6) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/summary.json
+ 7) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_PROBE_CLASSIFICATIONS/${FILE_START}.${DURATION}/${DIR_NAME}/pen_frequency.json
+
+
+STEP 7: Recompute the ground truth for DNSMON (through recalculate_DNSMON.py) Please note that Ping isn't functioning properly at this time. 
+*Input: START, STOP, ROOT, INTERVAL,  DATA TYPES, textfile with names of relevant data files,  list of islands, list of bad probes
+*Outputs are following
+ 1) Dictionary with key root and value is list with mean and standard dev of loss (considering all VP)
+ 2) Dictionary with key root and value is list with mean and standard dev of loss (considering all VP excluding island and peninsulas)
+ 3) Dictionary with key root and value is list with mean and standard dev of loss (considering all VP excluding island)
+ 4) Dataframe which gives QUeries Sent, Queries Failed, and Percent Loss for each of the following categories:
+    A) All VPs
+    B) No Islands
+    C) No Peninsulas
+    D) No Islands or Peninsulas
+    Rows are timebins, last row is for the full duration of time. 
+*Outputs can be found as follows
+1) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_GROUND_TRUTH/${FILE_START}.${DURATION}/${DIR_NAME}/${FILE_START}.${DURATION}.${BIN}.${TYPE}.org_statistics.json"
+2) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_GROUND_TRUTH/${FILE_START}.${DURATION}/${DIR_NAME}/${FILE_START}.${DURATION}.${BIN}.${TYPE}.fin_statistics.json"
+3) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_GROUND_TRUTH/${FILE_START}.${DURATION}/${DIR_NAME}/${FILE_START}.${DURATION}.${BIN}.${TYPE}.noIsland_statistics.json"
+4) /nfs/lander/working/tsaluja/DATA_OUTPUT/RIPE_ATLAS_GROUND_TRUTH/${FILE_START}.${DURATION}/${DIR_NAME}/${root}.${measurement id}.${FILE_START}.${DURATION}.${BIN}.${TYPE}.percent_by_type.csv"
+
+Back to run_parser.sh, the last few line just calculate dictionaries with lists and counts for outage categoreis
+1) both_misconfig_LAN.json
+2) soa_v4_misconfig_LAN.json
+3) soa_v6_misconfig_LAN.json
+4) soa_v4_misconfig_ISP.json
+5) soa_v6_misconfig_ISP.json
+
